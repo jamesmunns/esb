@@ -28,6 +28,8 @@ pub(crate) use pac::{
     Interrupt,
     radio::Radio,
 };
+// TODO
+pub use pac::RADIO;
 
 
 const CRC_INIT: u32 = 0x0000_FFFF;
