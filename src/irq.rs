@@ -1,13 +1,14 @@
 use crate::{
     app::Addresses,
     payload::{EsbHeader, PayloadR, PayloadW},
-    peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState, NVIC},
+    peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState},
     Config, Error, RAMP_UP_TIME,
 };
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
     ArrayLength,
 };
+use cortex_m::peripheral::NVIC;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},

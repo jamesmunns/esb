@@ -85,37 +85,37 @@
 
 #![no_std]
 
-// pub mod app;
-// pub mod buffer;
-// pub mod irq;
+pub mod app;
+pub mod buffer;
+pub mod irq;
 pub mod payload;
 pub mod peripherals;
 
 // Export crate relevant items
-// pub use crate::{
-//     app::{Addresses, EsbApp},
-//     buffer::EsbBuffer,
-//     irq::{EsbIrq, IrqTimer},
-//     payload::{EsbHeader, EsbHeaderBuilder},
-// };
+pub use crate::{
+    app::{Addresses, EsbApp},
+    buffer::EsbBuffer,
+    irq::{EsbIrq, IrqTimer},
+    payload::{EsbHeader, EsbHeaderBuilder},
+};
 
-// use core::default::Default;
-// // Export dependency items necessary to create a backing structure
-// pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
+use core::default::Default;
+// Export dependency items necessary to create a backing structure
+pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
 
-// // TODO: Figure it out good values
-// const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 120;
-// const RETRANSMIT_DELAY_US_OFFSET: u16 = 62;
-// const RETRANSMIT_DELAY: u16 = 500;
-// const MAXIMUM_TRANSMIT_ATTEMPTS: u8 = 3;
-// const ENABLED_PIPES: u8 = 0xFF;
+// TODO: Figure it out good values
+const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 120;
+const RETRANSMIT_DELAY_US_OFFSET: u16 = 62;
+const RETRANSMIT_DELAY: u16 = 500;
+const MAXIMUM_TRANSMIT_ATTEMPTS: u8 = 3;
+const ENABLED_PIPES: u8 = 0xFF;
 
-// #[cfg(not(feature = "fast-ru"))]
-// pub(crate) const RAMP_UP_TIME: u16 = 140;
+#[cfg(not(feature = "fast-ru"))]
+pub(crate) const RAMP_UP_TIME: u16 = 140;
 
-// // This is only true if we enable the fast ramp-up time, which we do
-// #[cfg(feature = "fast-ru")]
-// pub(crate) const RAMP_UP_TIME: u16 = 40;
+// This is only true if we enable the fast ramp-up time, which we do
+#[cfg(feature = "fast-ru")]
+pub(crate) const RAMP_UP_TIME: u16 = 40;
 
 /// Crate-wide error type
 #[derive(Debug, PartialEq, Eq)]
@@ -152,135 +152,135 @@ pub enum Error {
     MaximumAttempts,
 }
 
-// /// Tx Power
-// pub type TxPower = peripherals::TXPOWER_A;
+/// Tx Power
+pub type TxPower = peripherals::Txpower;
 
-// /// Protocol configuration
-// #[derive(Copy, Clone)]
-// pub struct Config {
-//     /// Number of microseconds to wait for an acknowledgement before timing out
-//     wait_for_ack_timeout: u16,
-//     /// Delay, in microseconds, between retransmissions when the radio does not receive an
-//     /// acknowledgement
-//     retransmit_delay: u16,
-//     /// Maximum number of transmit attempts when an acknowledgement is not received
-//     maximum_transmit_attempts: u8,
-//     /// A bit mask representing the pipes that the radio must listen while receiving, the LSb is
-//     /// pipe zero
-//     enabled_pipes: u8,
-//     /// Tx Power
-//     tx_power: TxPower,
-//     /// Maximum payload size in bytes that the driver will send or receive.
-//     ///
-//     /// This allows for a more efficient usage of the receiver queue and makes this driver
-//     /// compatible with nRF24L01+ modules when this size is 32 bytes or less
-//     maximum_payload_size: u8,
-// }
+/// Protocol configuration
+#[derive(Copy, Clone)]
+pub struct Config {
+    /// Number of microseconds to wait for an acknowledgement before timing out
+    wait_for_ack_timeout: u16,
+    /// Delay, in microseconds, between retransmissions when the radio does not receive an
+    /// acknowledgement
+    retransmit_delay: u16,
+    /// Maximum number of transmit attempts when an acknowledgement is not received
+    maximum_transmit_attempts: u8,
+    /// A bit mask representing the pipes that the radio must listen while receiving, the LSb is
+    /// pipe zero
+    enabled_pipes: u8,
+    /// Tx Power
+    tx_power: TxPower,
+    /// Maximum payload size in bytes that the driver will send or receive.
+    ///
+    /// This allows for a more efficient usage of the receiver queue and makes this driver
+    /// compatible with nRF24L01+ modules when this size is 32 bytes or less
+    maximum_payload_size: u8,
+}
 
-// impl Default for Config {
-//     fn default() -> Self {
-//         Self {
-//             wait_for_ack_timeout: RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS,
-//             retransmit_delay: RETRANSMIT_DELAY,
-//             maximum_transmit_attempts: MAXIMUM_TRANSMIT_ATTEMPTS,
-//             enabled_pipes: ENABLED_PIPES,
-//             tx_power: TxPower::_0DBM,
-//             maximum_payload_size: 252,
-//         }
-//     }
-// }
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            wait_for_ack_timeout: RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS,
+            retransmit_delay: RETRANSMIT_DELAY,
+            maximum_transmit_attempts: MAXIMUM_TRANSMIT_ATTEMPTS,
+            enabled_pipes: ENABLED_PIPES,
+            tx_power: TxPower::_0_DBM,
+            maximum_payload_size: 252,
+        }
+    }
+}
 
-// /// A builder for an `Config` structure
-// ///
-// /// The builder is converted into an `Config` by calling the
-// /// `check()` method.
-// ///
-// /// ## Example
-// ///
-// /// ```rust
-// /// use esb::ConfigBuilder;
-// ///
-// /// let config_result = ConfigBuilder::default()
-// ///     .wait_for_ack_timeout(50)
-// ///     .retransmit_delay(240)
-// ///     .maximum_transmit_attempts(4)
-// ///     .enabled_pipes(0x01)
-// ///     .check();
-// ///
-// /// assert!(config_result.is_ok());
-// /// ```
-// ///
-// /// ## Default Config Contents
-// ///
-// /// By default, the following settings will be used:
-// ///
-// /// | Field                               | Default Value |
-// /// | :---                                | :---          |
-// /// | Ack Timeout                         | 120 us        |
-// /// | Retransmit Delay                    | 500 us        |
-// /// | Maximum number of transmit attempts | 3             |
-// /// | Enabled Pipes                       | 0xFF          |
-// /// | Tx Power                            | 0dBm          |
-// /// | Maximum payload size                | 252 bytes     |
-// ///
-// pub struct ConfigBuilder(Config);
+/// A builder for an `Config` structure
+///
+/// The builder is converted into an `Config` by calling the
+/// `check()` method.
+///
+/// ## Example
+///
+/// ```rust
+/// use esb::ConfigBuilder;
+///
+/// let config_result = ConfigBuilder::default()
+///     .wait_for_ack_timeout(50)
+///     .retransmit_delay(240)
+///     .maximum_transmit_attempts(4)
+///     .enabled_pipes(0x01)
+///     .check();
+///
+/// assert!(config_result.is_ok());
+/// ```
+///
+/// ## Default Config Contents
+///
+/// By default, the following settings will be used:
+///
+/// | Field                               | Default Value |
+/// | :---                                | :---          |
+/// | Ack Timeout                         | 120 us        |
+/// | Retransmit Delay                    | 500 us        |
+/// | Maximum number of transmit attempts | 3             |
+/// | Enabled Pipes                       | 0xFF          |
+/// | Tx Power                            | 0dBm          |
+/// | Maximum payload size                | 252 bytes     |
+///
+pub struct ConfigBuilder(Config);
 
-// impl Default for ConfigBuilder {
-//     fn default() -> Self {
-//         Self(Config::default())
-//     }
-// }
+impl Default for ConfigBuilder {
+    fn default() -> Self {
+        Self(Config::default())
+    }
+}
 
-// impl ConfigBuilder {
-//     /// Sets number of microseconds to wait for an acknowledgement before timing out
-//     pub fn wait_for_ack_timeout(mut self, micros: u16) -> Self {
-//         self.0.wait_for_ack_timeout = micros;
-//         self
-//     }
+impl ConfigBuilder {
+    /// Sets number of microseconds to wait for an acknowledgement before timing out
+    pub fn wait_for_ack_timeout(mut self, micros: u16) -> Self {
+        self.0.wait_for_ack_timeout = micros;
+        self
+    }
 
-//     // TODO: document 62
-//     /// Sets retransmit delay, must be bigger than `wait_for_ack_timeout` field plus 62 and bigger
-//     /// than the ramp-up time (140us without fast-ru and 40us with fast-ru)
-//     pub fn retransmit_delay(mut self, micros: u16) -> Self {
-//         self.0.retransmit_delay = micros;
-//         self
-//     }
+    // TODO: document 62
+    /// Sets retransmit delay, must be bigger than `wait_for_ack_timeout` field plus 62 and bigger
+    /// than the ramp-up time (140us without fast-ru and 40us with fast-ru)
+    pub fn retransmit_delay(mut self, micros: u16) -> Self {
+        self.0.retransmit_delay = micros;
+        self
+    }
 
-//     /// Sets maximum number of transmit attempts
-//     pub fn maximum_transmit_attempts(mut self, n: u8) -> Self {
-//         self.0.maximum_transmit_attempts = n;
-//         self
-//     }
+    /// Sets maximum number of transmit attempts
+    pub fn maximum_transmit_attempts(mut self, n: u8) -> Self {
+        self.0.maximum_transmit_attempts = n;
+        self
+    }
 
-//     /// Sets enabled pipes for receiving
-//     pub fn enabled_pipes(mut self, enabled_pipes: u8) -> Self {
-//         self.0.enabled_pipes = enabled_pipes;
-//         self
-//     }
+    /// Sets enabled pipes for receiving
+    pub fn enabled_pipes(mut self, enabled_pipes: u8) -> Self {
+        self.0.enabled_pipes = enabled_pipes;
+        self
+    }
 
-//     /// Sets the tx power
-//     pub fn tx_power(mut self, tx_power: TxPower) -> Self {
-//         self.0.tx_power = tx_power;
-//         self
-//     }
+    /// Sets the tx power
+    pub fn tx_power(mut self, tx_power: TxPower) -> Self {
+        self.0.tx_power = tx_power;
+        self
+    }
 
-//     /// Sets the maximum payload size
-//     pub fn max_payload_size(mut self, payload_size: u8) -> Self {
-//         self.0.maximum_payload_size = payload_size;
-//         self
-//     }
+    /// Sets the maximum payload size
+    pub fn max_payload_size(mut self, payload_size: u8) -> Self {
+        self.0.maximum_payload_size = payload_size;
+        self
+    }
 
-//     pub fn check(self) -> Result<Config, Error> {
-//         let bad_ack_timeout = self.0.wait_for_ack_timeout < 44;
-//         let bad_retransmit_delay = self.0.retransmit_delay
-//             <= self.0.wait_for_ack_timeout + RETRANSMIT_DELAY_US_OFFSET
-//             || self.0.retransmit_delay <= RAMP_UP_TIME;
-//         let bad_size = self.0.maximum_payload_size > 252;
+    pub fn check(self) -> Result<Config, Error> {
+        let bad_ack_timeout = self.0.wait_for_ack_timeout < 44;
+        let bad_retransmit_delay = self.0.retransmit_delay
+            <= self.0.wait_for_ack_timeout + RETRANSMIT_DELAY_US_OFFSET
+            || self.0.retransmit_delay <= RAMP_UP_TIME;
+        let bad_size = self.0.maximum_payload_size > 252;
 
-//         if bad_ack_timeout || bad_retransmit_delay || bad_size {
-//             Err(Error::InvalidParameters)
-//         } else {
-//             Ok(self.0)
-//         }
-//     }
-// }
+        if bad_ack_timeout || bad_retransmit_delay || bad_size {
+            Err(Error::InvalidParameters)
+        } else {
+            Ok(self.0)
+        }
+    }
+}

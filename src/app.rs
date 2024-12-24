@@ -1,12 +1,14 @@
 use crate::{
     payload::{EsbHeader, PayloadR, PayloadW},
-    peripherals::{Interrupt, NVIC},
+//     peripherals::{Interrupt, NVIC},
     Error,
 };
 use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
     ArrayLength, Error as BbqError,
 };
+use cortex_m::peripheral::NVIC;
+use nrf_pac::Interrupt;
 use core::default::Default;
 
 /// This is the primary Application-side interface.

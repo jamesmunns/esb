@@ -13,23 +13,22 @@
 // #[cfg(feature = "52840")]
 // use nrf52840_pac as pac;
 
-use nrf_pac::{self as pac, radio::{regs::Rxaddresses, vals::Crcstatus}, timer::{regs::Int, vals::Bitmode}, TIMER0, TIMER1, TIMER2};
+use nrf_pac::{self as pac, radio::{regs::{Int as RadioInt, Prefix0, Prefix1, Rxaddresses}, vals::{Crcstatus, Endian, Len, Mode}}, timer::{regs::Int as TimerInt, vals::Bitmode}, TIMER0, TIMER1, TIMER2};
 
 use bbqueue::{framed::FrameConsumer, ArrayLength};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use crate::{
-//     app::Addresses,
+    app::Addresses,
     payload::{PayloadR, PayloadW},
     Error,
 };
 pub(crate) use pac::{
-    radio::regs::Txpower,
+    radio::vals::Txpower,
     Interrupt,
-    // NVIC,
-    RADIO,
-    radio::Radio
+    radio::Radio,
 };
+
 
 const CRC_INIT: u32 = 0x0000_FFFF;
 const CRC_POLY: u32 = 0x0001_1021;
@@ -83,78 +82,71 @@ where
         }
     }
 
-//     pub(crate) fn init(&mut self, max_payload: u8, tx_power: TXPOWER_A, addresses: &Addresses) {
-//         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
-//         self.radio
-//             .intenclr
-//             .write_value(0xFFFF_FFFF) });
-//         self.radio.mode.write(|w| w.mode().nrf_2mbit());
-//         let len_bits = if max_payload <= 32 { 6 } else { 8 };
-//         // Convert addresses to remain compatible with nRF24L devices
-//         let base0 = address_conversion(u32::from_le_bytes(addresses.base0));
-//         let base1 = address_conversion(u32::from_le_bytes(addresses.base1));
-//         let prefix0 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes0));
-//         let prefix1 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes1));
+    pub(crate) fn init(&mut self, max_payload: u8, tx_power: Txpower, addresses: &Addresses) {
+        // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
+        self.radio
+            .intenclr()
+            .write_value(RadioInt(0xFFFF_FFFF));
+        self.radio.mode().write(|w| w.set_mode(Mode::NRF_2MBIT));
+        let len_bits = if max_payload <= 32 { 6 } else { 8 };
+        // Convert addresses to remain compatible with nRF24L devices
+        let base0 = address_conversion(u32::from_le_bytes(addresses.base0));
+        let base1 = address_conversion(u32::from_le_bytes(addresses.base1));
+        let prefix0 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes0));
+        let prefix1 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes1));
 
-//         self.radio.shorts.write(|w| {
-//             w.ready_start()
-//                 .enabled()
-//                 .end_disable()
-//                 .enabled()
-//                 .address_rssistart()
-//                 .enabled()
-//                 .disabled_rssistop()
-//                 .enabled()
-//         });
+        self.radio.shorts().write(|w| {
+            w.set_ready_start(true);
+            w.set_end_disable(true);
+            w.set_address_rssistart(true);
+            w.set_disabled_rssistop(true);
+        });
 
-//         // Enable fast ramp-up
-//         #[cfg(feature = "fast-ru")]
-//         self.radio.modecnf0.modify(|w| w.ru().fast());
+        // Enable fast ramp-up
+        #[cfg(feature = "fast-ru")]
+        self.radio.modecnf0.modify(|w| w.ru().fast());
 
-//         self.radio.txpower.write(|w| w.txpower().variant(tx_power));
-//         unsafe {
-//             self.radio
-//                 .pcnf0
-//                 .write(|w| w.lflen().bits(len_bits).s1len().bits(3));
+        self.radio.txpower().write(|w| w.set_txpower(tx_power));
 
-//             self.radio.pcnf1.write(|w| {
-//                 w.maxlen()
-//                     .bits(max_payload)
-//                     // 4-Byte Base Address + 1-Byte Address Prefix
-//                     .balen()
-//                     .bits(4)
-//                     // Nordic's code doesn't use whitening, maybe enable in the future ?
-//                     //.whiteen()
-//                     //.set_bit()
-//                     .statlen()
-//                     .bits(0)
-//                     .endian()
-//                     .big()
-//             });
+        self.radio
+            .pcnf0()
+            .write(|w| {
+                w.set_lflen(len_bits);
+                w.set_s1len(3);
+            });
 
-//             self.radio
-//                 .crcinit
-//                 .write(|w| w.crcinit().bits(CRC_INIT & 0x00FF_FFFF));
+        self.radio.pcnf1().write(|w| {
+            w.set_maxlen(max_payload);
+            // 4-Byte Base Address + 1-Byte Address Prefix
+            w.set_balen(4);
+            // Nordic's code doesn't use whitening, maybe enable in the future ?
+            // w.set_whiteen(true);
+            w.set_statlen(0);
+            w.set_endian(Endian::BIG);
+        });
 
-//             self.radio
-//                 .crcpoly
-//                 .write(|w| w.crcpoly().bits(CRC_POLY & 0x00FF_FFFF));
+        self.radio
+            .crcinit()
+            .write(|w| w.set_crcinit(CRC_INIT & 0x00FF_FFFF));
 
-//             self.radio.crccnf.write(|w| w.len().two());
+        self.radio
+            .crcpoly()
+            .write(|w| w.set_crcpoly(CRC_POLY & 0x00FF_FFFF));
 
-//             self.radio.base0.write(|w| w.bits(base0));
-//             self.radio.base1.write(|w| w.bits(base1));
+        self.radio.crccnf().write(|w| w.set_len(Len::TWO));
 
-//             self.radio.prefix0.write(|w| w.bits(prefix0));
-//             self.radio.prefix1.write(|w| w.bits(prefix1));
+        self.radio.base0().write_value(base0);
+        self.radio.base1().write_value(base1);
 
-//             // NOTE(unsafe) `rf_channel` was checked to be between 0 and 100 during the creation of
-//             // the `Adresses` object
-//             self.radio
-//                 .frequency
-//                 .write(|w| w.frequency().bits(addresses.rf_channel));
-//         }
-//     }
+        self.radio.prefix0().write_value(Prefix0(prefix0));
+        self.radio.prefix1().write_value(Prefix1(prefix1));
+
+        // NOTE(unsafe) `rf_channel` was checked to be between 0 and 100 during the creation of
+        // the `Adresses` object
+        self.radio
+            .frequency()
+            .write(|w| w.set_frequency(addresses.rf_channel));
+    }
 
     // Clears the Disabled event to not retrigger the interrupt
     #[inline]
@@ -197,8 +189,8 @@ where
         self.radio
             .shorts()
             .modify(|w| {
-                w.set_disabled_rxen(true);
-                w.set_disabled_txen(true);
+                w.set_disabled_rxen(false);
+                w.set_disabled_txen(false);
             });
         self.disable_disabled_interrupt();
         self.radio.tasks_disable().write_value(1);
@@ -224,7 +216,7 @@ where
     pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
-            self.radio.shorts().modify(|w| w.set_disabled_rxen(false));
+            self.radio.shorts().modify(|w| w.set_disabled_rxen(true));
         }
         self.radio.intenset().write(|w| w.set_disabled(true));
         // NOTE(unsafe) Pipe fits in 3 bits
@@ -286,7 +278,7 @@ where
         // this already fired
         self.radio
             .shorts()
-            .modify(|w| w.set_disabled_rxen(true));
+            .modify(|w| w.set_disabled_rxen(false));
 
         // We don't release the packet here because we may need to retransmit
     }
@@ -560,18 +552,22 @@ pub trait EsbTimer: sealed::Sealed {
 
 use pac::timer::Timer;
 
-trait PtrTimer {
+pub trait PtrTimer {
     const ME: Timer;
     fn timer(&mut self) -> &mut Timer;
+    /// # Safety
+    ///
+    /// You only take once
+    unsafe fn take() -> Self;
 }
 
-struct Timer0 {
+pub struct Timer0 {
     timer: Timer,
 }
-struct Timer1 {
+pub struct Timer1 {
     timer: Timer,
 }
-struct Timer2 {
+pub struct Timer2 {
     timer: Timer,
 }
 
@@ -581,6 +577,10 @@ impl PtrTimer for Timer0 {
     fn timer(&mut self) -> &mut Timer {
         &mut self.timer
     }
+
+    unsafe fn take() -> Self {
+        Self { timer: Self::ME }
+    }
 }
 
 impl PtrTimer for Timer1 {
@@ -588,6 +588,10 @@ impl PtrTimer for Timer1 {
 
     fn timer(&mut self) -> &mut Timer {
         &mut self.timer
+    }
+
+    unsafe fn take() -> Self {
+        Self { timer: Self::ME }
     }
 }
 
@@ -597,13 +601,17 @@ impl PtrTimer for Timer2 {
     fn timer(&mut self) -> &mut Timer {
         &mut self.timer
     }
+
+    unsafe fn take() -> Self {
+        Self { timer: Self::ME }
+    }
 }
 
 impl<T: PtrTimer + sealed::Sealed> EsbTimer for T {
     #[inline]
     fn init(&mut self) {
         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
-        self.timer().intenclr().write_value(Int(0xFFFF_FFFF));
+        self.timer().intenclr().write_value(TimerInt(0xFFFF_FFFF));
         Self::stop();
         self.timer().bitmode().write(|w| w.set_bitmode(Bitmode::_32BIT));
         // 2^4 = 16

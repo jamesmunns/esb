@@ -28,11 +28,12 @@ default-target = "x86_64-unknown-linux-gnu"
 # nrf52833-pac = { version = "0.10.1", optional = true }
 # nrf52840-pac = { version = "0.10.1", optional = true }
 # log = { version = "0.4.8", optional = true }
+cortex-m = "0.7.7"
 
 [dependencies.nrf-pac]
 git = "https://github.com/embassy-rs/nrf-pac"
 rev = "52e3a757f06035c94291bfc42b0c03f71e4d677e"
-features = ["nrf52840"]
+features = ["nrf52840", "rt"]
 
 [dependencies.bbqueue]
 version = "0.4.10"

@@ -1,10 +1,11 @@
 use crate::{
     app::{Addresses, EsbApp},
     irq::{Disabled, EsbIrq, IrqTimer},
-    peripherals::{EsbRadio, EsbTimer, RADIO},
+    peripherals::{EsbRadio, EsbTimer},
     Config, Error,
 };
 use bbqueue::{ArrayLength, BBBuffer};
+use nrf_pac::radio::Radio;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
@@ -69,7 +70,7 @@ where
     pub fn try_split<T: EsbTimer>(
         &'static self,
         timer: T,
-        radio: RADIO,
+        radio: Radio,
         addresses: Addresses,
         config: Config,
     ) -> Result<
