@@ -1,27 +1,35 @@
-#[cfg(feature = "51")]
-use nrf51_pac as pac;
+// #[cfg(feature = "51")]
+// use nrf51_pac as pac;
 
-#[cfg(feature = "52810")]
-use nrf52810_pac as pac;
+// #[cfg(feature = "52810")]
+// use nrf52810_pac as pac;
 
-#[cfg(feature = "52832")]
-use nrf52832_pac as pac;
+// #[cfg(feature = "52832")]
+// use nrf52832_pac as pac;
 
-#[cfg(feature = "52833")]
-use nrf52833_pac as pac;
+// #[cfg(feature = "52833")]
+// use nrf52833_pac as pac;
 
-#[cfg(feature = "52840")]
-use nrf52840_pac as pac;
+// #[cfg(feature = "52840")]
+// use nrf52840_pac as pac;
+
+use nrf_pac::{self as pac, radio::{regs::Rxaddresses, vals::Crcstatus}, timer::{regs::Int, vals::Bitmode}, TIMER0, TIMER1, TIMER2};
 
 use bbqueue::{framed::FrameConsumer, ArrayLength};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use crate::{
-    app::Addresses,
+//     app::Addresses,
     payload::{PayloadR, PayloadW},
     Error,
 };
-pub(crate) use pac::{radio::txpower::TXPOWER_A, Interrupt, NVIC, RADIO};
+pub(crate) use pac::{
+    radio::regs::Txpower,
+    Interrupt,
+    // NVIC,
+    RADIO,
+    radio::Radio
+};
 
 const CRC_INIT: u32 = 0x0000_FFFF;
 const CRC_POLY: u32 = 0x0001_1021;
@@ -51,7 +59,7 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
-    radio: RADIO,
+    radio: Radio,
     tx_grant: Option<PayloadR<OutgoingLen>>,
     rx_grant: Option<PayloadW<IncomingLen>>,
     last_crc: [u16; NUM_PIPES],
@@ -64,7 +72,7 @@ where
     OutgoingLen: ArrayLength<u8>,
     IncomingLen: ArrayLength<u8>,
 {
-    pub(crate) fn new(radio: RADIO) -> Self {
+    pub(crate) fn new(radio: Radio) -> Self {
         EsbRadio {
             radio,
             tx_grant: None,
@@ -75,126 +83,129 @@ where
         }
     }
 
-    pub(crate) fn init(&mut self, max_payload: u8, tx_power: TXPOWER_A, addresses: &Addresses) {
-        // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
-        self.radio
-            .intenclr
-            .write(|w| unsafe { w.bits(0xFFFF_FFFF) });
-        self.radio.mode.write(|w| w.mode().nrf_2mbit());
-        let len_bits = if max_payload <= 32 { 6 } else { 8 };
-        // Convert addresses to remain compatible with nRF24L devices
-        let base0 = address_conversion(u32::from_le_bytes(addresses.base0));
-        let base1 = address_conversion(u32::from_le_bytes(addresses.base1));
-        let prefix0 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes0));
-        let prefix1 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes1));
+//     pub(crate) fn init(&mut self, max_payload: u8, tx_power: TXPOWER_A, addresses: &Addresses) {
+//         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
+//         self.radio
+//             .intenclr
+//             .write_value(0xFFFF_FFFF) });
+//         self.radio.mode.write(|w| w.mode().nrf_2mbit());
+//         let len_bits = if max_payload <= 32 { 6 } else { 8 };
+//         // Convert addresses to remain compatible with nRF24L devices
+//         let base0 = address_conversion(u32::from_le_bytes(addresses.base0));
+//         let base1 = address_conversion(u32::from_le_bytes(addresses.base1));
+//         let prefix0 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes0));
+//         let prefix1 = bytewise_bit_swap(u32::from_le_bytes(addresses.prefixes1));
 
-        self.radio.shorts.write(|w| {
-            w.ready_start()
-                .enabled()
-                .end_disable()
-                .enabled()
-                .address_rssistart()
-                .enabled()
-                .disabled_rssistop()
-                .enabled()
-        });
+//         self.radio.shorts.write(|w| {
+//             w.ready_start()
+//                 .enabled()
+//                 .end_disable()
+//                 .enabled()
+//                 .address_rssistart()
+//                 .enabled()
+//                 .disabled_rssistop()
+//                 .enabled()
+//         });
 
-        // Enable fast ramp-up
-        #[cfg(feature = "fast-ru")]
-        self.radio.modecnf0.modify(|_, w| w.ru().fast());
+//         // Enable fast ramp-up
+//         #[cfg(feature = "fast-ru")]
+//         self.radio.modecnf0.modify(|w| w.ru().fast());
 
-        self.radio.txpower.write(|w| w.txpower().variant(tx_power));
-        unsafe {
-            self.radio
-                .pcnf0
-                .write(|w| w.lflen().bits(len_bits).s1len().bits(3));
+//         self.radio.txpower.write(|w| w.txpower().variant(tx_power));
+//         unsafe {
+//             self.radio
+//                 .pcnf0
+//                 .write(|w| w.lflen().bits(len_bits).s1len().bits(3));
 
-            self.radio.pcnf1.write(|w| {
-                w.maxlen()
-                    .bits(max_payload)
-                    // 4-Byte Base Address + 1-Byte Address Prefix
-                    .balen()
-                    .bits(4)
-                    // Nordic's code doesn't use whitening, maybe enable in the future ?
-                    //.whiteen()
-                    //.set_bit()
-                    .statlen()
-                    .bits(0)
-                    .endian()
-                    .big()
-            });
+//             self.radio.pcnf1.write(|w| {
+//                 w.maxlen()
+//                     .bits(max_payload)
+//                     // 4-Byte Base Address + 1-Byte Address Prefix
+//                     .balen()
+//                     .bits(4)
+//                     // Nordic's code doesn't use whitening, maybe enable in the future ?
+//                     //.whiteen()
+//                     //.set_bit()
+//                     .statlen()
+//                     .bits(0)
+//                     .endian()
+//                     .big()
+//             });
 
-            self.radio
-                .crcinit
-                .write(|w| w.crcinit().bits(CRC_INIT & 0x00FF_FFFF));
+//             self.radio
+//                 .crcinit
+//                 .write(|w| w.crcinit().bits(CRC_INIT & 0x00FF_FFFF));
 
-            self.radio
-                .crcpoly
-                .write(|w| w.crcpoly().bits(CRC_POLY & 0x00FF_FFFF));
+//             self.radio
+//                 .crcpoly
+//                 .write(|w| w.crcpoly().bits(CRC_POLY & 0x00FF_FFFF));
 
-            self.radio.crccnf.write(|w| w.len().two());
+//             self.radio.crccnf.write(|w| w.len().two());
 
-            self.radio.base0.write(|w| w.bits(base0));
-            self.radio.base1.write(|w| w.bits(base1));
+//             self.radio.base0.write(|w| w.bits(base0));
+//             self.radio.base1.write(|w| w.bits(base1));
 
-            self.radio.prefix0.write(|w| w.bits(prefix0));
-            self.radio.prefix1.write(|w| w.bits(prefix1));
+//             self.radio.prefix0.write(|w| w.bits(prefix0));
+//             self.radio.prefix1.write(|w| w.bits(prefix1));
 
-            // NOTE(unsafe) `rf_channel` was checked to be between 0 and 100 during the creation of
-            // the `Adresses` object
-            self.radio
-                .frequency
-                .write(|w| w.frequency().bits(addresses.rf_channel));
-        }
-    }
+//             // NOTE(unsafe) `rf_channel` was checked to be between 0 and 100 during the creation of
+//             // the `Adresses` object
+//             self.radio
+//                 .frequency
+//                 .write(|w| w.frequency().bits(addresses.rf_channel));
+//         }
+//     }
 
     // Clears the Disabled event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_disabled_event(&mut self) {
-        self.radio.events_disabled.reset();
+        self.radio.events_disabled().write_value(0);
     }
 
     // Checks the Disabled event
     #[inline]
     pub(crate) fn check_disabled_event(&mut self) -> bool {
-        self.radio.events_disabled.read().bits() == 1
+        self.radio.events_disabled().read() == 1
     }
 
     // Clears the End event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_end_event(&mut self) {
-        self.radio.events_end.reset();
+        self.radio.events_end().write_value(0);
     }
 
     // Checks the Ready event
     #[inline]
     pub(crate) fn check_ready_event(&self) -> bool {
-        self.radio.events_ready.read().bits() == 1
+        self.radio.events_ready().read() == 1
     }
 
     // Clears the Ready event to not retrigger the interrupt
     #[inline]
     pub(crate) fn clear_ready_event(&mut self) {
-        self.radio.events_ready.reset();
+        self.radio.events_ready().write_value(0);
     }
 
     // Disables Disabled interrupt
     #[inline]
     pub(crate) fn disable_disabled_interrupt(&mut self) {
-        self.radio.intenclr.write(|w| w.disabled().set_bit());
+        self.radio.intenclr().write(|w| w.set_disabled(true));
     }
 
     // Disables the radio and the `radio disabled` interrupt
     pub(crate) fn stop(&mut self, drop_grants: bool) {
         self.radio
-            .shorts
-            .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().disabled());
+            .shorts()
+            .modify(|w| {
+                w.set_disabled_rxen(true);
+                w.set_disabled_txen(true);
+            });
         self.disable_disabled_interrupt();
-        self.radio.tasks_disable.write(|w| unsafe { w.bits(1) });
+        self.radio.tasks_disable().write_value(1);
 
         // Wait for the disable event to kick in, to make sure that the `task_disable` write won't
         // trigger an interrupt
-        while self.radio.events_disabled.read().bits() == 0 {}
+        while self.radio.events_disabled().read() == 0 {}
         self.clear_disabled_event();
 
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
@@ -213,33 +224,31 @@ where
     pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
-            self.radio.shorts.modify(|_, w| w.disabled_rxen().enabled());
+            self.radio.shorts().modify(|w| w.set_disabled_rxen(false));
         }
-        self.radio.intenset.write(|w| w.disabled().set_bit());
-        unsafe {
-            // NOTE(unsafe) Pipe fits in 3 bits
-            self.radio
-                .txaddress
-                .write(|w| w.txaddress().bits(payload.pipe()));
-            // NOTE(unsafe) Pipe only goes from 0 through 7
-            self.radio
-                .rxaddresses
-                .write(|w| w.bits(1 << payload.pipe()));
+        self.radio.intenset().write(|w| w.set_disabled(true));
+        // NOTE(unsafe) Pipe fits in 3 bits
+        self.radio
+            .txaddress()
+            .write(|w| w.set_txaddress(payload.pipe()));
+        // NOTE(unsafe) Pipe only goes from 0 through 7
+        self.radio
+            .rxaddresses()
+            .write_value(Rxaddresses(1 << payload.pipe()));
 
-            self.radio
-                .packetptr
-                .write(|w| w.bits(payload.dma_pointer() as u32));
-            self.radio.events_address.write(|w| w.bits(0));
-            self.clear_disabled_event();
-            self.clear_ready_event();
-            self.clear_end_event();
-            self.radio.events_payload.write(|w| w.bits(0)); // do we need this ? Probably not
+        self.radio
+            .packetptr()
+            .write_value(payload.dma_pointer() as u32);
+        self.radio.events_address().write_value(0);
+        self.clear_disabled_event();
+        self.clear_ready_event();
+        self.clear_end_event();
+        self.radio.events_payload().write_value(0); // do we need this ? Probably not
 
-            // "Preceding reads and writes cannot be moved past subsequent writes."
-            compiler_fence(Ordering::Release);
+        // "Preceding reads and writes cannot be moved past subsequent writes."
+        compiler_fence(Ordering::Release);
 
-            self.radio.tasks_txen.write(|w| w.bits(1));
-        }
+        self.radio.tasks_txen().write_value(1);
         self.tx_grant = Some(payload);
     }
 
@@ -267,8 +276,8 @@ where
         // "Preceding reads and writes cannot be moved past subsequent writes."
         compiler_fence(Ordering::Release);
         self.radio
-            .packetptr
-            .write(|w| unsafe { w.bits(rx_buf.dma_pointer() as u32) });
+            .packetptr()
+            .write_value(rx_buf.dma_pointer() as u32);
 
         // Check if the radio turn around was faster than us
         debug_assert!(!self.check_ready_event(), "Missed window (PTX)");
@@ -276,8 +285,8 @@ where
         self.rx_grant = Some(rx_buf);
         // this already fired
         self.radio
-            .shorts
-            .modify(|_, w| w.disabled_rxen().disabled());
+            .shorts()
+            .modify(|w| w.set_disabled_rxen(true));
 
         // We don't release the packet here because we may need to retransmit
     }
@@ -286,7 +295,7 @@ where
     // The upper stack is responsible for checking and disabling the timeouts
     #[inline]
     pub(crate) fn check_ack(&mut self) -> Result<bool, Error> {
-        let ret = self.radio.crcstatus.read().crcstatus().is_crcok();
+        let ret = self.radio.crcstatus().read().crcstatus() == Crcstatus::CRCOK;
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
 
@@ -299,7 +308,7 @@ where
             let pipe = tx_grant.pipe();
             tx_grant.release();
 
-            let rssi = self.radio.rssisample.read().rssisample().bits();
+            let rssi = self.radio.rssisample().read().rssisample();
             rx_grant.set_pipe(pipe);
             rx_grant.set_rssi(rssi);
             rx_grant.commit_all();
@@ -317,28 +326,27 @@ where
     // Start listening for packets and setup necessary shorts and interrupts
     pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<IncomingLen>, enabled_pipes: u8) {
         // Start TX after receiving a packet as it might need an ack
-        self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
+        self.radio.shorts().modify(|w| w.set_disabled_txen(true));
 
-        self.radio.intenset.write(|w| w.disabled().set_bit());
+        self.radio.intenset().write(|w| w.set_disabled(true));
         self.radio
-            .rxaddresses
-            .write(|w| unsafe { w.bits(enabled_pipes as u32) });
+            .rxaddresses()
+            .write_value(Rxaddresses(enabled_pipes as u32));
 
-        unsafe {
-            self.radio
-                .packetptr
-                .write(|w| w.bits(rx_buf.dma_pointer() as u32));
-            self.radio.events_address.write(|w| w.bits(0));
-            self.clear_disabled_event();
-            self.clear_ready_event();
-            self.clear_end_event();
-            self.radio.events_payload.write(|w| w.bits(0)); // TODO: do we need this ? Probably not
+        self.radio
+            .packetptr()
+            .write_value(rx_buf.dma_pointer() as u32);
+        self.radio.events_address().write_value(0);
+        self.clear_disabled_event();
+        self.clear_ready_event();
+        self.clear_end_event();
+        self.radio.events_payload().write_value(0); // TODO: do we need this ? Probably not
 
-            // "Preceding reads and writes cannot be moved past subsequent writes."
-            compiler_fence(Ordering::Release);
+        // "Preceding reads and writes cannot be moved past subsequent writes."
+        compiler_fence(Ordering::Release);
 
-            self.radio.tasks_rxen.write(|w| w.bits(1));
-        }
+        self.radio.tasks_rxen().write_value(1);
+
         self.rx_grant = Some(rx_buf);
     }
 
@@ -351,24 +359,24 @@ where
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
 
-        if self.radio.crcstatus.read().crcstatus().is_crcerror() {
+        if self.radio.crcstatus().read().crcstatus() == Crcstatus::CRCERROR {
             // Bad CRC, clear events and restart RX.
             self.stop(false);
-            self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
-            self.radio.intenset.write(|w| w.disabled().set_bit());
+            self.radio.shorts().modify(|w| w.set_disabled_txen(true));
+            self.radio.intenset().write(|w| w.set_disabled(true));
             // "Preceding reads and writes cannot be moved past subsequent writes."
             compiler_fence(Ordering::Release);
 
             // NOTE(unsafe) 1 is a valid value to write to this register
-            self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
+            self.radio.tasks_rxen().write_value(1);
             return Ok(RxPayloadState::BadCRC);
         }
         // "Subsequent reads and writes cannot be moved ahead of preceding reads."
         compiler_fence(Ordering::Acquire);
         self.clear_ready_event();
 
-        let pipe = self.radio.rxmatch.read().rxmatch().bits() as usize;
-        let crc = self.radio.rxcrc.read().rxcrc().bits() as u16;
+        let pipe = self.radio.rxmatch().read().rxmatch() as usize;
+        let crc = self.radio.rxcrc().read().rxcrc() as u16;
         let rx_grant = self.rx_grant.as_ref().ok_or(Error::InternalError)?;
         let (pid, ack) = (rx_grant.pid(), !rx_grant.no_ack());
         let repeated = (self.last_crc[pipe] == crc) && (self.last_pid[pipe] == pid);
@@ -381,8 +389,10 @@ where
 
             // NOTE(unsafe) Any byte value is valid for this register.
             self.radio
-                .txaddress
-                .write(|w| unsafe { w.txaddress().bits(pipe as u8) });
+                .txaddress()
+                .write(|w| {
+                    w.set_txaddress(pipe as u8);
+                });
 
             let mut dma_pointer = FALLBACK_ACK.as_ptr() as *const u8 as u32;
 
@@ -412,8 +422,8 @@ where
 
             // NOTE(unsafe) Any u32 is valid to write to this register.
             self.radio
-                .packetptr
-                .write(|w| unsafe { w.bits(dma_pointer) });
+                .packetptr()
+                .write_value(dma_pointer);
 
             // Check if the ramp-up was faster than us :/
             debug_assert!(!self.check_ready_event(), "Missed window (PRX)");
@@ -422,8 +432,11 @@ where
             // Enables the shortcut for `rxen` to turn around to rx after the end of the ack
             // transmission.
             self.radio
-                .shorts
-                .modify(|_, w| w.disabled_txen().disabled().disabled_rxen().enabled());
+                .shorts()
+                .modify(|w| {
+                    w.set_disabled_txen(false);
+                    w.set_disabled_rxen(true);
+                });
         } else {
             // Stops the radio before transmission begins
             self.stop(false);
@@ -441,7 +454,7 @@ where
         self.cached_pipe = pipe as u8;
 
         let mut grant = self.rx_grant.take().ok_or(Error::InternalError)?;
-        let rssi = self.radio.rssisample.read().rssisample().bits();
+        let rssi = self.radio.rssisample().read().rssisample();
         grant.set_rssi(rssi);
         grant.set_pipe(pipe as u8);
         grant.commit_all();
@@ -473,8 +486,8 @@ where
         compiler_fence(Ordering::SeqCst);
 
         self.radio
-            .packetptr
-            .write(|w| unsafe { w.bits(dma_pointer) });
+            .packetptr()
+            .write_value(dma_pointer);
 
         // We don't release the `tx_grant` here, because we don't know if it was really received.
 
@@ -482,8 +495,11 @@ where
         // Enables the shortcut for `txen` to turn around to tx after receiving a packet
         // transmission.
         self.radio
-            .shorts
-            .modify(|_, w| w.disabled_rxen().disabled().disabled_txen().enabled());
+            .shorts()
+            .modify(|w| {
+                w.set_disabled_rxen(false);
+                w.set_disabled_txen(true);
+            });
         Ok(())
     }
 
@@ -495,17 +511,17 @@ where
         // only need to update if `rx_buf` is `Some`.
         if let Some(mut grant) = rx_buf.take() {
             self.radio
-                .packetptr
-                .write(|w| unsafe { w.bits(grant.dma_pointer() as u32) });
+                .packetptr()
+                .write_value(grant.dma_pointer() as u32);
             self.rx_grant = Some(grant);
         }
 
-        self.radio.shorts.modify(|_, w| w.disabled_txen().enabled());
-        self.radio.intenset.write(|w| w.disabled().set_bit());
+        self.radio.shorts().modify(|w| w.set_disabled_txen(true));
+        self.radio.intenset().write(|w| w.set_disabled(true));
         // "Preceding reads and writes cannot be moved past subsequent writes."
         compiler_fence(Ordering::Release);
 
-        self.radio.tasks_rxen.write(|w| unsafe { w.bits(1) });
+        self.radio.tasks_rxen().write_value(1);
     }
 }
 
@@ -542,97 +558,135 @@ pub trait EsbTimer: sealed::Sealed {
     fn stop();
 }
 
-macro_rules! impl_timer {
-    ( $($ty:ty),+ ) => {
-        $(
-            impl EsbTimer for $ty {
-                #[inline]
-                fn init(&mut self) {
-                    // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
-                    self.intenclr.write(|w| unsafe { w.bits(0xFFFF_FFFF) });
-                    Self::stop();
-                    self.bitmode.write(|w| w.bitmode()._32bit());
-                    // 2^4 = 16
-                    // 16 MHz / 16 = 1 MHz = µs resolution
-                    self.prescaler.write(|w| unsafe { w.prescaler().bits(4) });
-                }
+use pac::timer::Timer;
 
-                // CC[0] will be used for the retransmit timeout and CC[1] will be used for the ack
-                // timeout
-
-                #[inline]
-                fn set_interrupt_retransmit(&mut self, micros: u16) {
-                    self.cc[0].write(|w| unsafe { w.bits(micros as u32) });
-                    self.events_compare[0].reset();
-                    self.intenset.write(|w| w.compare0().set());
-
-                    // Clears and starts the counter
-                    self.tasks_clear.write(|w| unsafe { w.bits(1) });
-                    self.tasks_start.write(|w| unsafe { w.bits(1) });
-                }
-
-                #[inline]
-                fn clear_interrupt_retransmit() {
-                    // NOTE(unsafe) This will be used for atomic operations, only
-                    let timer = unsafe { &*Self::ptr() };
-
-                    timer.intenclr.write(|w| w.compare0().clear());
-                    timer.events_compare[0].reset();
-
-                    Self::stop();
-                }
-
-                #[inline]
-                fn is_retransmit_pending() -> bool {
-                    // NOTE(unsafe) This will be used for atomic operations, only
-                    let timer = unsafe { &*Self::ptr() };
-
-                    timer.events_compare[0].read().bits() == 1u32
-                }
-
-                fn set_interrupt_ack(&mut self, micros: u16) {
-                    // get current counter
-                    self.tasks_capture[1].write(|w| unsafe { w.bits(1) });
-                    let current_counter = self.cc[1].read().bits();
-
-                    self.cc[1].write(|w| unsafe { w.bits(current_counter + micros as u32) });
-                    self.events_compare[1].reset();
-                    self.intenset.write(|w| w.compare1().set());
-                }
-
-                #[inline]
-                fn clear_interrupt_ack() {
-                    // NOTE(unsafe) This will be used for atomic operations, only
-                    let timer = unsafe { &*Self::ptr() };
-
-                    timer.intenclr.write(|w| w.compare1().clear());
-                    timer.events_compare[1].reset();
-                }
-
-                #[inline]
-                fn is_ack_pending() -> bool {
-                    // NOTE(unsafe) This will be used for atomic operations, only
-                    let timer = unsafe { &*Self::ptr() };
-
-                    timer.events_compare[1].read().bits() == 1u32
-                }
-
-                #[inline]
-                fn stop() {
-                    // NOTE(unsafe) This will be used for atomic operations, only
-                    let timer = unsafe { &*Self::ptr() };
-
-                    timer.tasks_stop.write(|w| unsafe { w.bits(1) });
-                }
-            }
-
-            impl sealed::Sealed for $ty {}
-        )+
-    };
+trait PtrTimer {
+    const ME: Timer;
+    fn timer(&mut self) -> &mut Timer;
 }
 
-#[cfg(not(feature = "51"))]
-impl_timer!(pac::TIMER0, pac::TIMER1, pac::TIMER2);
+struct Timer0 {
+    timer: Timer,
+}
+struct Timer1 {
+    timer: Timer,
+}
+struct Timer2 {
+    timer: Timer,
+}
 
-#[cfg(feature = "51")]
-impl_timer!(pac::TIMER0);
+impl PtrTimer for Timer0 {
+    const ME: Timer = TIMER0;
+
+    fn timer(&mut self) -> &mut Timer {
+        &mut self.timer
+    }
+}
+
+impl PtrTimer for Timer1 {
+    const ME: Timer = TIMER1;
+
+    fn timer(&mut self) -> &mut Timer {
+        &mut self.timer
+    }
+}
+
+impl PtrTimer for Timer2 {
+    const ME: Timer = TIMER2;
+
+    fn timer(&mut self) -> &mut Timer {
+        &mut self.timer
+    }
+}
+
+impl<T: PtrTimer + sealed::Sealed> EsbTimer for T {
+    #[inline]
+    fn init(&mut self) {
+        // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
+        self.timer().intenclr().write_value(Int(0xFFFF_FFFF));
+        Self::stop();
+        self.timer().bitmode().write(|w| w.set_bitmode(Bitmode::_32BIT));
+        // 2^4 = 16
+        // 16 MHz / 16 = 1 MHz = µs resolution
+        self.timer().prescaler().write(|w| w.set_prescaler(4));
+    }
+
+    // CC[0] will be used for the retransmit timeout and CC[1] will be used for the ack
+    // timeout
+
+    #[inline]
+    fn set_interrupt_retransmit(&mut self, micros: u16) {
+        self.timer().cc(0).write_value(micros as u32);
+        self.timer().events_compare(0).write_value(0);
+        self.timer().intenset().write(|w| w.set_compare(0, true));
+
+        // Clears and starts the counter
+        self.timer().tasks_clear().write_value(1);
+        self.timer().tasks_start().write_value(1);
+    }
+
+    #[inline]
+    fn clear_interrupt_retransmit() {
+        // NOTE(unsafe) This will be used for atomic operations, only
+        let timer = Self::ME;
+
+        timer.intenclr().write(|w| w.set_compare(0, false));
+        timer.events_compare(0).write_value(0);
+
+        Self::stop();
+    }
+
+    #[inline]
+    fn is_retransmit_pending() -> bool {
+        // NOTE(unsafe) This will be used for atomic operations, only
+        let timer = Self::ME;
+
+        timer.events_compare(0).read() == 1u32
+    }
+
+    fn set_interrupt_ack(&mut self, micros: u16) {
+        // get current counter
+        self.timer().tasks_capture(1).write_value(1);
+        let current_counter = self.timer().cc(1).read();
+
+        self.timer().cc(1).write_value(current_counter + micros as u32);
+        self.timer().events_compare(1).write_value(0);
+        self.timer().intenset().write(|w| w.set_compare(1, true));
+    }
+
+    #[inline]
+    fn clear_interrupt_ack() {
+        // NOTE(unsafe) This will be used for atomic operations, only
+        let timer = Self::ME;
+
+        timer.intenclr().write(|w| w.set_compare(1, false));
+        timer.events_compare(1).write_value(0);
+    }
+
+    #[inline]
+    fn is_ack_pending() -> bool {
+        // NOTE(unsafe) This will be used for atomic operations, only
+        let timer = Self::ME;
+
+        timer.events_compare(1).read() == 1u32
+    }
+
+    #[inline]
+    fn stop() {
+        // NOTE(unsafe) This will be used for atomic operations, only
+        let timer = Self::ME;
+
+        timer.tasks_stop().write_value(1);
+    }
+}
+
+impl sealed::Sealed for Timer0 {}
+impl sealed::Sealed for Timer1 {}
+impl sealed::Sealed for Timer2 {}
+
+
+// #[cfg(not(feature = "51"))]
+// impl_timer!(pac::TIMER0, pac::TIMER1, pac::TIMER2);
+
+// #[cfg(feature = "51")]
+// impl_timer!(pac::TIMER0);

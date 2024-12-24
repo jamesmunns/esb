@@ -22,21 +22,27 @@ features = ["52832"]
 default-target = "x86_64-unknown-linux-gnu"
 
 [dependencies]
-nrf51-pac = { version = "0.10.1", optional = true }
-nrf52810-pac = { version = "0.10.1", optional = true }
-nrf52832-pac = { version = "0.10.1", optional = true }
-nrf52833-pac = { version = "0.10.1", optional = true }
-nrf52840-pac = { version = "0.10.1", optional = true }
-log = { version = "0.4.8", optional = true }
+# nrf51-pac = { version = "0.10.1", optional = true }
+# nrf52810-pac = { version = "0.10.1", optional = true }
+# nrf52832-pac = { version = "0.10.1", optional = true }
+# nrf52833-pac = { version = "0.10.1", optional = true }
+# nrf52840-pac = { version = "0.10.1", optional = true }
+# log = { version = "0.4.8", optional = true }
+
+[dependencies.nrf-pac]
+git = "https://github.com/embassy-rs/nrf-pac"
+rev = "52e3a757f06035c94291bfc42b0c03f71e4d677e"
+features = ["nrf52840"]
 
 [dependencies.bbqueue]
 version = "0.4.10"
 default-features = false
 
 [features]
+# default = ["52840"]
 fast-ru = []
-51 = ["nrf51-pac", "bbqueue/thumbv6"]
-52810 = ["nrf52810-pac", "bbqueue/atomic"]
-52832 = ["nrf52832-pac", "bbqueue/atomic"]
-52833 = ["nrf52833-pac", "bbqueue/atomic"]
-52840 = ["nrf52840-pac", "bbqueue/atomic"]
+# 51 = ["nrf51-pac", "bbqueue/thumbv6"]
+# 52810 = ["nrf52810-pac", "bbqueue/atomic"]
+# 52832 = ["nrf52832-pac", "bbqueue/atomic"]
+# 52833 = ["nrf52833-pac", "bbqueue/atomic"]
+# 52840 = ["nrf52840-pac", "bbqueue/atomic"]
