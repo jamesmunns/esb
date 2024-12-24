@@ -280,7 +280,7 @@ where
     ///
     /// This includes part of the header, as well as the full payload
     pub(crate) fn dma_pointer(&self) -> *const u8 {
-        (&self.grant[EsbHeader::dma_payload_offset()..]).as_ptr()
+        self.grant[EsbHeader::dma_payload_offset()..].as_ptr()
     }
 
     /// Utility method to use with the CCM peripheral present in Nordic's devices. This gives a
@@ -418,7 +418,7 @@ where
     }
 
     pub(crate) fn dma_pointer(&mut self) -> *mut u8 {
-        (&mut self.grant[EsbHeader::dma_payload_offset()..]).as_mut_ptr()
+        self.grant[EsbHeader::dma_payload_offset()..].as_mut_ptr()
     }
 
     /// Update the pipe field.

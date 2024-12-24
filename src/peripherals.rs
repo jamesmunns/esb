@@ -388,7 +388,7 @@ where
                     w.set_txaddress(pipe as u8);
                 });
 
-            let mut dma_pointer = FALLBACK_ACK.as_ptr() as *const u8 as u32;
+            let mut dma_pointer = FALLBACK_ACK.as_ptr() as u32;
 
             if repeated {
                 if pipe == self.cached_pipe as usize {
