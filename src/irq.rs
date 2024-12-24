@@ -8,11 +8,11 @@ use bbqueue::{
     framed::{FrameConsumer, FrameProducer},
     ArrayLength,
 };
-use cortex_m::peripheral::NVIC;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
+use cortex_m::peripheral::NVIC;
 
 /// Type to represent the driver in the disabled mode
 pub struct Disabled;

@@ -13,7 +13,15 @@
 // #[cfg(feature = "52840")]
 // use nrf52840_pac as pac;
 
-use nrf_pac::{self as pac, radio::{regs::{Int as RadioInt, Prefix0, Prefix1, Rxaddresses}, vals::{Crcstatus, Endian, Len, Mode}}, timer::{regs::Int as TimerInt, vals::Bitmode}, TIMER0, TIMER1, TIMER2};
+use nrf_pac::{
+    self as pac,
+    radio::{
+        regs::{Int as RadioInt, Prefix0, Prefix1, Rxaddresses},
+        vals::{Crcstatus, Endian, Len, Mode},
+    },
+    timer::{regs::Int as TimerInt, vals::Bitmode},
+    TIMER0, TIMER1, TIMER2,
+};
 
 use bbqueue::{framed::FrameConsumer, ArrayLength};
 use core::sync::atomic::{compiler_fence, Ordering};
@@ -23,14 +31,9 @@ use crate::{
     payload::{PayloadR, PayloadW},
     Error,
 };
-pub(crate) use pac::{
-    radio::vals::Txpower,
-    Interrupt,
-    radio::Radio,
-};
+pub(crate) use pac::{radio::vals::Txpower, radio::Radio, Interrupt};
 // TODO
 pub use pac::RADIO;
-
 
 const CRC_INIT: u32 = 0x0000_FFFF;
 const CRC_POLY: u32 = 0x0001_1021;
@@ -86,9 +89,7 @@ where
 
     pub(crate) fn init(&mut self, max_payload: u8, tx_power: Txpower, addresses: &Addresses) {
         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
-        self.radio
-            .intenclr()
-            .write_value(RadioInt(0xFFFF_FFFF));
+        self.radio.intenclr().write_value(RadioInt(0xFFFF_FFFF));
         self.radio.mode().write(|w| w.set_mode(Mode::NRF_2MBIT));
         let len_bits = if max_payload <= 32 { 6 } else { 8 };
         // Convert addresses to remain compatible with nRF24L devices
@@ -110,12 +111,10 @@ where
 
         self.radio.txpower().write(|w| w.set_txpower(tx_power));
 
-        self.radio
-            .pcnf0()
-            .write(|w| {
-                w.set_lflen(len_bits);
-                w.set_s1len(3);
-            });
+        self.radio.pcnf0().write(|w| {
+            w.set_lflen(len_bits);
+            w.set_s1len(3);
+        });
 
         self.radio.pcnf1().write(|w| {
             w.set_maxlen(max_payload);
@@ -188,12 +187,10 @@ where
 
     // Disables the radio and the `radio disabled` interrupt
     pub(crate) fn stop(&mut self, drop_grants: bool) {
-        self.radio
-            .shorts()
-            .modify(|w| {
-                w.set_disabled_rxen(false);
-                w.set_disabled_txen(false);
-            });
+        self.radio.shorts().modify(|w| {
+            w.set_disabled_rxen(false);
+            w.set_disabled_txen(false);
+        });
         self.disable_disabled_interrupt();
         self.radio.tasks_disable().write_value(1);
 
@@ -278,9 +275,7 @@ where
 
         self.rx_grant = Some(rx_buf);
         // this already fired
-        self.radio
-            .shorts()
-            .modify(|w| w.set_disabled_rxen(false));
+        self.radio.shorts().modify(|w| w.set_disabled_rxen(false));
 
         // We don't release the packet here because we may need to retransmit
     }
@@ -382,11 +377,9 @@ where
             // have problems to acknowledge consistently if we do so.
 
             // NOTE(unsafe) Any byte value is valid for this register.
-            self.radio
-                .txaddress()
-                .write(|w| {
-                    w.set_txaddress(pipe as u8);
-                });
+            self.radio.txaddress().write(|w| {
+                w.set_txaddress(pipe as u8);
+            });
 
             let mut dma_pointer = FALLBACK_ACK.as_ptr() as u32;
 
@@ -415,9 +408,7 @@ where
             compiler_fence(Ordering::Release);
 
             // NOTE(unsafe) Any u32 is valid to write to this register.
-            self.radio
-                .packetptr()
-                .write_value(dma_pointer);
+            self.radio.packetptr().write_value(dma_pointer);
 
             // Check if the ramp-up was faster than us :/
             debug_assert!(!self.check_ready_event(), "Missed window (PRX)");
@@ -425,12 +416,10 @@ where
             // Disables the shortcut for `txen`, we already hit that.
             // Enables the shortcut for `rxen` to turn around to rx after the end of the ack
             // transmission.
-            self.radio
-                .shorts()
-                .modify(|w| {
-                    w.set_disabled_txen(false);
-                    w.set_disabled_rxen(true);
-                });
+            self.radio.shorts().modify(|w| {
+                w.set_disabled_txen(false);
+                w.set_disabled_rxen(true);
+            });
         } else {
             // Stops the radio before transmission begins
             self.stop(false);
@@ -479,21 +468,17 @@ where
         // "No re-ordering of reads and writes across this point is allowed."
         compiler_fence(Ordering::SeqCst);
 
-        self.radio
-            .packetptr()
-            .write_value(dma_pointer);
+        self.radio.packetptr().write_value(dma_pointer);
 
         // We don't release the `tx_grant` here, because we don't know if it was really received.
 
         // Disables the shortcut for `rxen`, we already hit that.
         // Enables the shortcut for `txen` to turn around to tx after receiving a packet
         // transmission.
-        self.radio
-            .shorts()
-            .modify(|w| {
-                w.set_disabled_rxen(false);
-                w.set_disabled_txen(true);
-            });
+        self.radio.shorts().modify(|w| {
+            w.set_disabled_rxen(false);
+            w.set_disabled_txen(true);
+        });
         Ok(())
     }
 
@@ -615,7 +600,9 @@ impl<T: PtrTimer + sealed::Sealed> EsbTimer for T {
         // Disables all interrupts, Nordic's code writes to all bits, seems to be okay
         self.timer().intenclr().write_value(TimerInt(0xFFFF_FFFF));
         Self::stop();
-        self.timer().bitmode().write(|w| w.set_bitmode(Bitmode::_32BIT));
+        self.timer()
+            .bitmode()
+            .write(|w| w.set_bitmode(Bitmode::_32BIT));
         // 2^4 = 16
         // 16 MHz / 16 = 1 MHz = µs resolution
         self.timer().prescaler().write(|w| w.set_prescaler(4));
@@ -659,7 +646,9 @@ impl<T: PtrTimer + sealed::Sealed> EsbTimer for T {
         self.timer().tasks_capture(1).write_value(1);
         let current_counter = self.timer().cc(1).read();
 
-        self.timer().cc(1).write_value(current_counter + micros as u32);
+        self.timer()
+            .cc(1)
+            .write_value(current_counter + micros as u32);
         self.timer().events_compare(1).write_value(0);
         self.timer().intenset().write(|w| w.set_compare(1, true));
     }
@@ -693,7 +682,6 @@ impl<T: PtrTimer + sealed::Sealed> EsbTimer for T {
 impl sealed::Sealed for Timer0 {}
 impl sealed::Sealed for Timer1 {}
 impl sealed::Sealed for Timer2 {}
-
 
 // #[cfg(not(feature = "51"))]
 // impl_timer!(pac::TIMER0, pac::TIMER1, pac::TIMER2);

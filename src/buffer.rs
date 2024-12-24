@@ -5,11 +5,11 @@ use crate::{
     Config, Error,
 };
 use bbqueue::{ArrayLength, BBBuffer};
-use nrf_pac::radio::Radio;
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
+use nrf_pac::radio::Radio;
 
 /// This is the backing structure for the ESB interface
 ///
