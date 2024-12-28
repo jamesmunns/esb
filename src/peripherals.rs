@@ -23,11 +23,10 @@ use nrf_pac::{
     TIMER0, TIMER1, TIMER2,
 };
 
-use bbqueue::{framed::FrameConsumer, ArrayLength};
 use core::sync::atomic::{compiler_fence, Ordering};
 
 use crate::{
-    app::Addresses,
+    app::{Addresses, FramedConsumer},
     payload::{PayloadR, PayloadW},
     Error,
 };
@@ -58,23 +57,17 @@ pub(crate) enum RxPayloadState {
     BadCRC,
 }
 
-pub struct EsbRadio<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+pub struct EsbRadio<const OUT: usize, const IN: usize>
 {
     radio: Radio,
-    tx_grant: Option<PayloadR<OutgoingLen>>,
-    rx_grant: Option<PayloadW<IncomingLen>>,
+    tx_grant: Option<PayloadR<OUT>>,
+    rx_grant: Option<PayloadW<IN>>,
     last_crc: [u16; NUM_PIPES],
     last_pid: [u8; NUM_PIPES],
     cached_pipe: u8,
 }
 
-impl<OutgoingLen, IncomingLen> EsbRadio<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+impl<const OUT: usize, const IN: usize> EsbRadio<OUT, IN>
 {
     pub(crate) fn new(radio: Radio) -> Self {
         EsbRadio {
@@ -212,7 +205,7 @@ where
     // --------------- PTX methods --------------- //
 
     // Transmit a packet and setup interrupts.
-    pub(crate) fn transmit(&mut self, payload: PayloadR<OutgoingLen>, ack: bool) {
+    pub(crate) fn transmit(&mut self, payload: PayloadR<OUT>, ack: bool) {
         if ack {
             // Go to RX mode after the transmission
             self.radio.shorts().modify(|w| w.set_disabled_rxen(true));
@@ -260,7 +253,7 @@ where
 
     // Must be called after the end of TX if the user requested for an ack.
     // Timers must be set accordingly by the upper stack
-    pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IncomingLen>) {
+    pub(crate) fn prepare_for_ack(&mut self, mut rx_buf: PayloadW<IN>) {
         self.clear_ready_event();
         // We need a compiler fence here because the DMA will automatically start listening for
         // packets after the ramp-up is completed
@@ -313,7 +306,7 @@ where
     // --------------- PRX methods --------------- //
 
     // Start listening for packets and setup necessary shorts and interrupts
-    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<IncomingLen>, enabled_pipes: u8) {
+    pub(crate) fn start_receiving(&mut self, mut rx_buf: PayloadW<IN>, enabled_pipes: u8) {
         // Start TX after receiving a packet as it might need an ack
         self.radio.shorts().modify(|w| w.set_disabled_txen(true));
 
@@ -343,7 +336,7 @@ where
     #[inline]
     pub(crate) fn check_packet(
         &mut self,
-        consumer: &mut FrameConsumer<'static, OutgoingLen>,
+        consumer: &mut FramedConsumer<OUT>,
     ) -> Result<RxPayloadState, Error> {
         // If the user didn't provide a packet to send, we will fall back to this empty ack packet
         static FALLBACK_ACK: [u8; 2] = [0, 0];
@@ -398,7 +391,7 @@ where
                 // "No re-ordering of reads and writes across this point is allowed."
                 compiler_fence(Ordering::SeqCst);
 
-                if let Some(payload) = consumer.read().map(PayloadR::new) {
+                if let Ok(payload) = consumer.read().map(PayloadR::new) {
                     dma_pointer = payload.dma_pointer() as u32;
                     self.tx_grant = Some(payload);
                 }
@@ -452,7 +445,7 @@ where
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedAck`
     pub(crate) fn complete_rx_ack(
         &mut self,
-        mut rx_buf: Option<PayloadW<IncomingLen>>,
+        mut rx_buf: Option<PayloadW<IN>>,
     ) -> Result<(), Error> {
         let dma_pointer = if let Some(mut grant) = rx_buf.take() {
             let pointer = grant.dma_pointer() as u32;
@@ -484,7 +477,7 @@ where
 
     // Must be called after `check_packet` returns `RxPayloadState::NoAck`.
     // `rx_buf` must only be `None` if a previous call to `check_packet` returned `RepeatedNoAck`
-    pub(crate) fn complete_rx_no_ack(&mut self, mut rx_buf: Option<PayloadW<IncomingLen>>) {
+    pub(crate) fn complete_rx_no_ack(&mut self, mut rx_buf: Option<PayloadW<IN>>) {
         // Since we're in the no-ack branch, the previous value of `packetptr` still is the last
         // `rx_grant` that we still hold if `check_packet` returned `RepeatedNoAck`. Therefore, we
         // only need to update if `rx_buf` is `Some`.

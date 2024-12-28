@@ -1,12 +1,8 @@
 use crate::{
-    app::Addresses,
+    app::{Addresses, FramedConsumer, FramedProducer},
     payload::{EsbHeader, PayloadR, PayloadW},
     peripherals::{EsbRadio, EsbTimer, Interrupt, RxPayloadState},
     Config, Error, RAMP_UP_TIME,
-};
-use bbqueue::{
-    framed::{FrameConsumer, FrameProducer},
-    ArrayLength,
 };
 use core::{
     marker::PhantomData,
@@ -74,23 +70,21 @@ impl<T: EsbTimer> IrqTimer<T> {
 /// It is intended to be used inside of the `RADIO` interrupt,
 /// and allows for sending or receiving frames from the Application
 /// hardware.
-pub struct EsbIrq<OutgoingLen, IncomingLen, Timer, STATE>
+pub struct EsbIrq<const OUT: usize, const IN: usize, Timer, STATE>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Producer to send incoming frames FROM the radio, TO the application
-    pub(crate) prod_to_app: FrameProducer<'static, IncomingLen>,
+    pub(crate) prod_to_app: FramedProducer<IN>,
 
     /// Consumer to receive outgoing frames TO the radio, FROM the application
-    pub(crate) cons_from_app: FrameConsumer<'static, OutgoingLen>,
+    pub(crate) cons_from_app: FramedConsumer<OUT>,
 
     /// Peripheral timer, use for ACK and other timeouts
     pub(crate) timer: Timer,
 
     /// Wrapping structure of the nRF RADIO peripheral
-    pub(crate) radio: EsbRadio<OutgoingLen, IncomingLen>,
+    pub(crate) radio: EsbRadio<OUT, IN>,
 
     /// Current state of the Radio/IRQ task
     pub(crate) state: STATE,
@@ -113,14 +107,12 @@ struct Events {
     timer: bool,
 }
 
-impl<OutgoingLen, IncomingLen, Timer, STATE> EsbIrq<OutgoingLen, IncomingLen, Timer, STATE>
+impl<const OUT: usize, const IN: usize, Timer, STATE> EsbIrq<OUT, IN, Timer, STATE>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Puts the driver in the disabled state
-    pub fn into_disabled(mut self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, Disabled> {
+    pub fn into_disabled(mut self) -> EsbIrq<OUT, IN, Timer, Disabled> {
         // Put the radio in a known state
         self.radio.stop(true);
         Timer::clear_interrupt_retransmit();
@@ -160,14 +152,12 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, Disabled>
+impl<const OUT: usize, const IN: usize, Timer> EsbIrq<OUT, IN, Timer, Disabled>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Puts the driver in the PTX mode
-    pub fn into_ptx(self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePTX> {
+    pub fn into_ptx(self) -> EsbIrq<OUT, IN, Timer, StatePTX> {
         EsbIrq {
             prod_to_app: self.prod_to_app,
             cons_from_app: self.cons_from_app,
@@ -183,7 +173,7 @@ where
 
     /// Puts the driver in the PRX mode in a idle state, the user must call
     /// [start_receiving](struct.EsbIrq.html#method.start_receiving) to enable the radio for receiving
-    pub fn into_prx(self) -> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePRX> {
+    pub fn into_prx(self) -> EsbIrq<OUT, IN, Timer, StatePRX> {
         EsbIrq {
             prod_to_app: self.prod_to_app,
             cons_from_app: self.cons_from_app,
@@ -198,10 +188,8 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePTX>
+impl<const OUT: usize, const IN: usize, Timer> EsbIrq<OUT, IN, Timer, StatePTX>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Must be called inside the radio interrupt handler
@@ -234,7 +222,7 @@ where
 
                 let packet = self
                     .prod_to_app
-                    .grant(self.config.maximum_payload_size as usize + EsbHeader::header_size())
+                    .grant(u16::from(self.config.maximum_payload_size) + EsbHeader::header_size())
                     .map(PayloadW::new_from_radio);
                 if let Ok(packet) = packet {
                     self.radio.prepare_for_ack(packet);
@@ -284,7 +272,7 @@ where
 
                     // We reached the maximum number of attempts, `radio.stop()` dropped the radio
                     // grants and we will release the last packet and try the next one
-                    if let Some(old_packet) = self.cons_from_app.read() {
+                    if let Ok(old_packet) = self.cons_from_app.read() {
                         old_packet.release();
                     }
                     self.attempts = 0;
@@ -306,7 +294,7 @@ where
     }
 
     fn send_packet(&mut self) {
-        if let Some(packet) = self.cons_from_app.read().map(PayloadR::new) {
+        if let Ok(packet) = self.cons_from_app.read().map(PayloadR::new) {
             let ack = !packet.no_ack();
             self.radio.transmit(packet, ack);
             if ack {
@@ -321,10 +309,8 @@ where
     }
 }
 
-impl<OutgoingLen, IncomingLen, Timer> EsbIrq<OutgoingLen, IncomingLen, Timer, StatePRX>
+impl<const OUT: usize, const IN: usize, Timer> EsbIrq<OUT, IN, Timer, StatePRX>
 where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
     Timer: EsbTimer,
 {
     /// Must be called inside the radio interrupt handler
@@ -421,11 +407,11 @@ where
 
     fn prepare_receiver<F>(&mut self, f: F) -> Result<(), Error>
     where
-        F: FnOnce(&mut Self, PayloadW<IncomingLen>) -> Result<(), Error>,
+        F: FnOnce(&mut Self, PayloadW<IN>) -> Result<(), Error>,
     {
         if let Ok(grant) = self
             .prod_to_app
-            .grant(usize::from(self.config.maximum_payload_size) + EsbHeader::header_size())
+            .grant(u16::from(self.config.maximum_payload_size) + EsbHeader::header_size())
             .map(PayloadW::new_from_radio)
         {
             f(self, grant)?;

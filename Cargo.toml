@@ -35,9 +35,16 @@ git = "https://github.com/embassy-rs/nrf-pac"
 rev = "52e3a757f06035c94291bfc42b0c03f71e4d677e"
 features = ["nrf52840"]
 
-[dependencies.bbqueue]
-version = "0.4.10"
+# [dependencies.bbqueue]
+# version = "0.4.10"
+# default-features = false
+
+[dependencies.bbq2]
+# git = "https://github.com/jamesmunns/bbq2"
+# rev = "907cc6ae9740edd240808e4d2840fe97c9eeb201"
+path = "/Users/james/personal/bbq2"
 default-features = false
+features = ["cas-atomics", "maitake-sync-0_1", "critical-section"]
 
 [features]
 # default = ["52840"]
@@ -47,3 +54,7 @@ fast-ru = []
 # 52832 = ["nrf52832-pac", "bbqueue/atomic"]
 # 52833 = ["nrf52833-pac", "bbqueue/atomic"]
 # 52840 = ["nrf52840-pac", "bbqueue/atomic"]
+
+[patch.crates-io.maitake-sync]
+git = "https://github.com/jamesmunns/mycelium/"
+rev = "3d70f02bcc0de0e0cc0602ddc2b4aee7a34c5201"

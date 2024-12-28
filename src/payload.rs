@@ -1,12 +1,27 @@
 use crate::Error;
-use bbqueue::{
-    framed::{FrameGrantR, FrameGrantW},
-    ArrayLength,
-};
 use core::ops::{Deref, DerefMut};
+use bbq2::{
+    queue::BBQueue,
+    traits::{coordination::cas::AtomicCoord, notifier::maitake::MaiNotSpsc, storage::Inline},
+};
 
 // | SW USE                        |               ACTUAL DMA PART                                    |
 // | rssi - 1 byte | pipe - 1 byte | length - 1 byte | pid_no_ack - 1 byte | payload - 1 to 252 bytes |
+
+type FramedGrantR<const N: usize> = bbq2::prod_cons::framed::FramedGrantR<
+    &'static BBQueue<Inline<N>, AtomicCoord, MaiNotSpsc>,
+    Inline<N>,
+    AtomicCoord,
+    MaiNotSpsc,
+    u16,
+>;
+type FramedGrantW<const N: usize> = bbq2::prod_cons::framed::FramedGrantW<
+    &'static BBQueue<Inline<N>, AtomicCoord, MaiNotSpsc>,
+    Inline<N>,
+    AtomicCoord,
+    MaiNotSpsc,
+    u16,
+>;
 
 /// A builder for an `EsbHeader` structure
 ///
@@ -147,6 +162,7 @@ pub struct EsbHeader {
 }
 
 /// The "packed" representation of an [`EsbHeader`]
+#[repr(transparent)]
 pub(crate) struct HeaderBytes(pub(crate) [u8; 4]);
 
 impl EsbHeader {
@@ -207,8 +223,8 @@ impl EsbHeader {
     }
 
     /// Accessor for the length (in bytes) of the payload
-    pub fn payload_len(self) -> usize {
-        usize::from(self.length)
+    pub fn payload_len(self) -> u16 {
+        self.length.into()
     }
 
     /// Accessor for the rssi of the payload
@@ -239,8 +255,8 @@ impl EsbHeader {
     }
 
     /// Size of the header (packed) in bytes
-    pub(crate) const fn header_size() -> usize {
-        core::mem::size_of::<HeaderBytes>()
+    pub(crate) const fn header_size() -> u16 {
+        core::mem::size_of::<HeaderBytes>() as u16
     }
 
     /// Offset of the bytes needed for DMA processing
@@ -255,22 +271,20 @@ impl EsbHeader {
 /// been sent FROM the app, and are being read by the RADIO,
 /// or a payload that has send FROM the Radio, and is being
 /// read by the app
-pub struct PayloadR<N: ArrayLength<u8>> {
-    grant: FrameGrantR<'static, N>,
+pub struct PayloadR<const N: usize> {
+    grant: FramedGrantR<N>,
 }
 
-impl<N> PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> PayloadR<N>
 {
     /// Create a wrapped Payload Grant from a raw BBQueue Framed Grant
-    pub(crate) fn new(raw_grant: FrameGrantR<'static, N>) -> Self {
+    pub(crate) fn new(raw_grant: FramedGrantR<N>) -> Self {
         Self { grant: raw_grant }
     }
 
     /// Obtain a copy of the header encoded in the current grant
     pub fn get_header(&self) -> EsbHeader {
-        const LEN: usize = EsbHeader::header_size();
+        const LEN: usize = EsbHeader::header_size() as usize;
         let mut bytes = [0u8; LEN];
         bytes.copy_from_slice(&self.grant[..LEN]);
         EsbHeader::from_bytes(HeaderBytes(bytes))
@@ -319,42 +333,36 @@ where
         self.grant.release()
     }
 
-    /// Set whether the payload should automatically release on drop
-    #[inline(always)]
-    pub fn auto_release(&mut self, is_auto: bool) {
-        self.grant.auto_release(is_auto);
-    }
+    // /// Set whether the payload should automatically release on drop
+    // #[inline(always)]
+    // pub fn auto_release(&mut self, is_auto: bool) {
+    //     self.grant.auto_release(is_auto);
+    // }
 }
 
-impl<N> Deref for PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> Deref for PayloadR<N>
 {
     type Target = [u8];
 
     /// Provide read only access to the payload of a grant
     fn deref(&self) -> &Self::Target {
-        &self.grant[EsbHeader::header_size()..]
+        &self.grant[EsbHeader::header_size().into()..]
     }
 }
 
-impl<N> DerefMut for PayloadR<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> DerefMut for PayloadR<N>
 {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.grant[EsbHeader::header_size()..]
+        &mut self.grant[EsbHeader::header_size().into()..]
     }
 }
 
-pub struct PayloadW<N: ArrayLength<u8>> {
-    grant: FrameGrantW<'static, N>,
+pub struct PayloadW<const N: usize> {
+    grant: FramedGrantW<N>,
 }
 
-impl<N> PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> PayloadW<N>
 {
     /// Update the header contained within this grant.
     ///
@@ -374,9 +382,9 @@ where
 
         // `length` must always be 0..=252 (checked by constructor), so `u8` cast is
         // appropriate here
-        let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
+        let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size().into());
         header.length = header.length.min(payload_max as u8);
-        self.grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
+        self.grant[..EsbHeader::header_size().into()].copy_from_slice(&header.into_bytes().0);
     }
 
     /// Utility method to use with the CCM peripheral present in Nordic's devices. This gives a
@@ -405,15 +413,15 @@ where
     /// Obtain a writable grant from the application side.
     ///
     /// This method should only be used from within `EsbApp`.
-    pub(crate) fn new_from_app(mut raw_grant: FrameGrantW<'static, N>, header: EsbHeader) -> Self {
-        raw_grant[..EsbHeader::header_size()].copy_from_slice(&header.into_bytes().0);
+    pub(crate) fn new_from_app(mut raw_grant: FramedGrantW<N>, header: EsbHeader) -> Self {
+        raw_grant[..EsbHeader::header_size().into()].copy_from_slice(&header.into_bytes().0);
         Self { grant: raw_grant }
     }
 
     /// Obtain a writable grant from the RADIO/interrupt side.
     ///
     /// This method should only be used from within `EsbIrq`.
-    pub(crate) fn new_from_radio(raw_grant: FrameGrantW<'static, N>) -> Self {
+    pub(crate) fn new_from_radio(raw_grant: FramedGrantW<N>) -> Self {
         Self { grant: raw_grant }
     }
 
@@ -451,8 +459,8 @@ where
     }
 
     /// An accessor function to get the maximum size of the payload of the current grant
-    pub fn payload_len(&self) -> usize {
-        self.grant[EsbHeader::length_idx()] as usize
+    pub fn payload_len(&self) -> u16 {
+        self.grant[EsbHeader::length_idx()] as u16
     }
 
     /// Commit the entire granted packet and payload
@@ -465,20 +473,20 @@ where
         self.grant.commit(payload_len + EsbHeader::header_size())
     }
 
-    /// Set the amount to automatically commit on drop
-    ///
-    /// If `None` is given, then the packet will not be commited. If `Some(0)`
-    /// is given, then an empty packet will be committed automatically
-    pub fn to_commit(&mut self, amt: Option<usize>) {
-        if let Some(amt) = amt {
-            let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size());
-            let payload_len = payload_max.min(amt);
-            self.grant[EsbHeader::length_idx()] = payload_len as u8;
-            self.grant.to_commit(payload_len + EsbHeader::header_size());
-        } else {
-            self.grant.to_commit(0);
-        }
-    }
+    // /// Set the amount to automatically commit on drop
+    // ///
+    // /// If `None` is given, then the packet will not be commited. If `Some(0)`
+    // /// is given, then an empty packet will be committed automatically
+    // pub fn to_commit(&mut self, amt: Option<usize>) {
+    //     if let Some(amt) = amt {
+    //         let payload_max = self.grant.len().saturating_sub(EsbHeader::header_size().into());
+    //         let payload_len = payload_max.min(amt);
+    //         self.grant[EsbHeader::length_idx()] = payload_len as u8;
+    //         self.grant.to_commit(payload_len + EsbHeader::header_size());
+    //     } else {
+    //         self.grant.to_commit(0);
+    //     }
+    // }
 
     /// Commit the packed, including the first `used` bytes of the payload
     ///
@@ -489,31 +497,27 @@ where
     /// If `used` is larger than the maximum size of the grant (or of the
     /// ESB protocol), the packet will be truncated.
     pub fn commit(mut self, used: usize) {
-        let payload_len = self.payload_len().min(used);
+        let payload_len: u16 = self.payload_len().min(used as u16);
         self.grant[EsbHeader::length_idx()] = payload_len as u8;
 
         self.grant.commit(payload_len + EsbHeader::header_size())
     }
 }
 
-impl<N> Deref for PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> Deref for PayloadW<N>
 {
     type Target = [u8];
 
     /// provide read only access to the payload portion of the grant
     fn deref(&self) -> &Self::Target {
-        &self.grant[EsbHeader::header_size()..]
+        &self.grant[EsbHeader::header_size().into()..]
     }
 }
 
-impl<N> DerefMut for PayloadW<N>
-where
-    N: ArrayLength<u8>,
+impl<const N: usize> DerefMut for PayloadW<N>
 {
     /// provide read/write access to the payload portion of the grant
     fn deref_mut(&mut self) -> &mut [u8] {
-        &mut self.grant[EsbHeader::header_size()..]
+        &mut self.grant[EsbHeader::header_size().into()..]
     }
 }

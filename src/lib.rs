@@ -101,7 +101,8 @@ pub use crate::{
 
 use core::default::Default;
 // Export dependency items necessary to create a backing structure
-pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
+// pub use bbqueue::{consts, ArrayLength, BBBuffer, ConstBBBuffer};
+pub use bbq2;
 
 // TODO: Figure it out good values
 const RX_WAIT_FOR_ACK_TIMEOUT_US_2MBPS: u16 = 120;
@@ -223,13 +224,8 @@ impl Default for Config {
 /// | Tx Power                            | 0dBm          |
 /// | Maximum payload size                | 252 bytes     |
 ///
+#[derive(Default)]
 pub struct ConfigBuilder(Config);
-
-impl Default for ConfigBuilder {
-    fn default() -> Self {
-        Self(Config::default())
-    }
-}
 
 impl ConfigBuilder {
     /// Sets number of microseconds to wait for an acknowledgement before timing out

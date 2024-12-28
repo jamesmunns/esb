@@ -4,11 +4,11 @@ use crate::{
     peripherals::{EsbRadio, EsbTimer},
     Config, Error,
 };
-use bbqueue::{ArrayLength, BBBuffer};
 use core::{
     marker::PhantomData,
     sync::atomic::{AtomicBool, Ordering},
 };
+use bbq2::{nicknames::Texas, traits::notifier::maitake::MaiNotSpsc};
 use nrf_pac::radio::Radio;
 
 /// This is the backing structure for the ESB interface
@@ -44,20 +44,14 @@ use nrf_pac::radio::Radio;
 ///     timer_flag: AtomicBool::new(false),
 /// };
 /// ```
-pub struct EsbBuffer<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+pub struct EsbBuffer<const OUT: usize, const IN: usize>
 {
-    pub app_to_radio_buf: BBBuffer<OutgoingLen>,
-    pub radio_to_app_buf: BBBuffer<IncomingLen>,
+    pub app_to_radio_buf: Texas<OUT, MaiNotSpsc>,
+    pub radio_to_app_buf: Texas<IN, MaiNotSpsc>,
     pub timer_flag: AtomicBool,
 }
 
-impl<OutgoingLen, IncomingLen> EsbBuffer<OutgoingLen, IncomingLen>
-where
-    OutgoingLen: ArrayLength<u8>,
-    IncomingLen: ArrayLength<u8>,
+impl<const OUT: usize, const IN: usize> EsbBuffer<OUT, IN>
 {
     /// Attempt to split the `static` buffer into handles for Interrupt and App context
     ///
@@ -75,20 +69,20 @@ where
         config: Config,
     ) -> Result<
         (
-            EsbApp<OutgoingLen, IncomingLen>,
-            EsbIrq<OutgoingLen, IncomingLen, T, Disabled>,
+            EsbApp<OUT, IN>,
+            EsbIrq<OUT, IN, T, Disabled>,
             IrqTimer<T>,
         ),
         Error,
     > {
-        let (atr_prod, atr_cons) = self
-            .app_to_radio_buf
-            .try_split_framed()
-            .map_err(|_| Error::AlreadySplit)?;
-        let (rta_prod, rta_cons) = self
-            .radio_to_app_buf
-            .try_split_framed()
-            .map_err(|_| Error::AlreadySplit)?;
+        let (atr_prod, atr_cons) = (
+            self.app_to_radio_buf.framed_producer(),
+            self.app_to_radio_buf.framed_consumer(),
+        );
+        let (rta_prod, rta_cons) = (
+            self.radio_to_app_buf.framed_producer(),
+            self.radio_to_app_buf.framed_consumer(),
+        );
 
         // Clear the timer flag
         self.timer_flag.store(false, Ordering::Release);
