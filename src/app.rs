@@ -40,7 +40,120 @@ pub struct EsbApp<const OUT: usize, const IN: usize> {
     pub(crate) maximum_payload: u8,
 }
 
+pub struct EsbAppSender<const OUT: usize> {
+    pub(crate) prod_to_radio: FramedProducer<OUT>,
+    pub(crate) maximum_payload: u8,
+}
+
+impl<const OUT: usize> EsbAppSender<OUT> {
+
+    /// Obtain a grant for an outgoing packet to be sent over the Radio
+    ///
+    /// When space is available, this function will return a [`PayloadW`],
+    /// which can be written into for data to be sent over the radio. If
+    /// the given parameters are incorrect, or if no space is available,
+    /// or if a grant is already in progress, an error will be returned.
+    ///
+    /// ## Notes
+    ///
+    /// Once a grant has been created, the maximum size of the grant can not
+    /// be increased, only shrunk. If a larger grant is needed, you must
+    /// `drop` the old grant, and create a new one.
+    ///
+    /// Only one grant may be active at a time.
+    pub fn grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OUT>, Error> {
+        // Check we have not exceeded the configured packet max
+        if header.length > self.maximum_payload {
+            return Err(Error::MaximumPacketExceeded);
+        }
+
+        let grant_result = self
+            .prod_to_radio
+            .grant(header.payload_len() + EsbHeader::header_size());
+
+        let grant = grant_result.map_err(|err| match err {
+            // BbqError::GrantInProgress => Error::GrantInProgress,
+            // BbqError::InsufficientSize => Error::OutgoingQueueFull,
+            _ => Error::InternalError,
+        })?;
+        Ok(PayloadW::new_from_app(grant, header))
+    }
+
+    pub async fn wait_grant_packet(&mut self, header: EsbHeader) -> Result<PayloadW<OUT>, Error> {
+        // Check we have not exceeded the configured packet max
+        if header.length > self.maximum_payload {
+            return Err(Error::MaximumPacketExceeded);
+        }
+
+        let grant = self
+            .prod_to_radio
+            .wait_grant(header.payload_len() + EsbHeader::header_size()).await;
+
+        Ok(PayloadW::new_from_app(grant, header))
+    }
+
+    /// Starts the radio sending all packets in the queue.
+    ///
+    /// The radio will send until the queue has been drained. This method must be called again if
+    /// the queue is completely drained before the user commits new packets.
+    #[inline]
+    pub fn start_tx(&mut self) {
+        // TODO(AJM): Is this appropriate for PRX? Or is this a PTX-only
+        // sort of interface?
+
+        // Do we need to do anything other than pend the interrupt?
+        NVIC::pend(Interrupt::RADIO)
+    }
+
+    /// Gets the maximum payload size (in bytes) that the driver was configured to use.
+    #[inline]
+    pub fn maximum_payload_size(&self) -> usize {
+        self.maximum_payload.into()
+    }
+}
+
+pub struct EsbAppReceiver<const IN: usize> {
+    pub(crate) cons_from_radio: FramedConsumer<IN>,
+    pub(crate) maximum_payload: u8,
+}
+
+impl<const IN: usize> EsbAppReceiver<IN> {
+    /// Is there a received message that is ready to be read?
+    ///
+    /// Returns `true` if a call to `read_packet` would return `Some`.
+    pub fn msg_ready(&mut self) -> bool {
+        // Dropping the grant does not release it.
+        self.cons_from_radio.read().is_ok()
+    }
+
+    /// Attempt to read a packet that has been received via the radio.
+    ///
+    /// Returns `Some(PayloadR)` if a packet is ready to be read,
+    /// otherwise `None`.
+    pub fn read_packet(&mut self) -> Option<PayloadR<IN>> {
+        self.cons_from_radio.read().ok().map(PayloadR::new)
+    }
+
+    pub async fn wait_read_packet(&mut self) -> PayloadR<IN> {
+        PayloadR::new(self.cons_from_radio.wait_read().await)
+    }
+
+    /// Gets the maximum payload size (in bytes) that the driver was configured to use.
+    #[inline]
+    pub fn maximum_payload_size(&self) -> usize {
+        self.maximum_payload.into()
+    }
+}
+
 impl<const OUT: usize, const IN: usize> EsbApp<OUT, IN> {
+    pub fn split(self) -> (EsbAppSender<OUT>, EsbAppReceiver<IN>) {
+        let EsbApp { prod_to_radio, cons_from_radio, maximum_payload } = self;
+        (
+            EsbAppSender { prod_to_radio, maximum_payload },
+            EsbAppReceiver { cons_from_radio, maximum_payload },
+        )
+    }
+
     /// Obtain a grant for an outgoing packet to be sent over the Radio
     ///
     /// When space is available, this function will return a [`PayloadW`],
