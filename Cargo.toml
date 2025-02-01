@@ -1,16 +1,16 @@
 [package]
-name = "esb"
+name = "esb-ng"
 version = "0.1.0"
 edition = "2018"
 description = "Implementation of Nordic's Enhanced ShockBurst communication protocol"
 
 authors = [
     "Thales Fragoso <thales.fragosoz@gmail.com>",
-    "James Munns <james.munns@ferrous-systems.com>"
+    "James Munns <james.munns@onevariable.com>"
 ]
 
-repository = "https://github.com/thalesfragoso/esb"
-documentation = "https://docs.rs/esb"
+repository = "https://github.com/jamesmunns/esb"
+documentation = "https://docs.rs/esb-ng"
 readme = "README.md"
 
 categories = ["embedded", "no-std"]
@@ -18,7 +18,7 @@ keywords = ["arm", "cortex-m", "nrf", "radio", "communication"]
 license = "MIT OR Apache-2.0"
 
 [package.metadata.docs.rs]
-features = ["52832"]
+# features = ["52832"]
 default-target = "x86_64-unknown-linux-gnu"
 
 [dependencies]
@@ -31,8 +31,7 @@ default-target = "x86_64-unknown-linux-gnu"
 cortex-m = "0.7.7"
 
 [dependencies.nrf-pac]
-git = "https://github.com/embassy-rs/nrf-pac"
-rev = "52e3a757f06035c94291bfc42b0c03f71e4d677e"
+version = "0.1"
 features = ["nrf52840"]
 
 # [dependencies.bbqueue]
@@ -40,11 +39,9 @@ features = ["nrf52840"]
 # default-features = false
 
 [dependencies.bbq2]
-# git = "https://github.com/jamesmunns/bbq2"
-# rev = "907cc6ae9740edd240808e4d2840fe97c9eeb201"
-path = "/Users/james/personal/bbq2"
+version = "0.1"
 default-features = false
-features = ["cas-atomics", "maitake-sync-0_1", "critical-section"]
+features = ["cas-atomics", "maitake-sync-0_2", "critical-section"]
 
 [features]
 # default = ["52840"]
@@ -54,7 +51,3 @@ fast-ru = []
 # 52832 = ["nrf52832-pac", "bbqueue/atomic"]
 # 52833 = ["nrf52833-pac", "bbqueue/atomic"]
 # 52840 = ["nrf52840-pac", "bbqueue/atomic"]
-
-[patch.crates-io.maitake-sync]
-git = "https://github.com/jamesmunns/mycelium/"
-rev = "3d70f02bcc0de0e0cc0602ddc2b4aee7a34c5201"

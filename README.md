@@ -2,11 +2,9 @@
 
 This is an **unofficial** implementation of Nordic's Enhanced ShockBurst communication protocol.
 
-[Documentation](https://docs.rs/esb)
-
-Usage examples can be found at the [demos repository](https://github.com/thalesfragoso/esb-demos).
-
 Enhanced ShockBurst is a trademark of Nordic Semiconductor ASA.
+
+You probably don't want to use this, this is James' hacky fork of the `esb` crate for now
 
 ## License
 
